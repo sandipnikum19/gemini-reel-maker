@@ -1,6 +1,5 @@
 ﻿import argparse
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -26,18 +25,22 @@ THEMES = [
     {
         "name": "warm_cinema",
         "font_size": 56,
-        "y_ratio": 0.75,
-        "box_fill": (12, 14, 22, 190),
+        "y_ratio": 0.76,
+        "box_fill": (12, 14, 22, 195),
         "text_fill": (255, 246, 214, 255),
+        "card_bg": (15, 18, 28, 255),
+        "accent": (255, 204, 92, 255),
         "zoom_start": 1.00,
         "zoom_end": 1.10,
     },
     {
         "name": "neon_rose",
         "font_size": 58,
-        "y_ratio": 0.72,
-        "box_fill": (26, 10, 28, 190),
+        "y_ratio": 0.74,
+        "box_fill": (26, 10, 28, 195),
         "text_fill": (255, 220, 240, 255),
+        "card_bg": (24, 10, 26, 255),
+        "accent": (255, 105, 180, 255),
         "zoom_start": 1.08,
         "zoom_end": 1.00,
     },
@@ -45,12 +48,44 @@ THEMES = [
         "name": "clean_gold",
         "font_size": 54,
         "y_ratio": 0.78,
-        "box_fill": (10, 18, 24, 185),
+        "box_fill": (10, 18, 24, 190),
         "text_fill": (255, 215, 110, 255),
+        "card_bg": (12, 20, 28, 255),
+        "accent": (255, 215, 110, 255),
         "zoom_start": 1.02,
         "zoom_end": 1.12,
     },
 ]
+
+
+def make_card_png(title: str, subtitle: str, out_png: Path, theme: dict, width: int = 1080, height: int = 1920) -> None:
+    img = Image.new("RGBA", (width, height), theme["card_bg"])
+    draw = ImageDraw.Draw(img)
+
+    title_font = load_font(66)
+    sub_font = load_font(42)
+
+    draw.rounded_rectangle(
+        [90, height // 2 - 220, width - 90, height // 2 + 220],
+        radius=36,
+        fill=(255, 255, 255, 18),
+        outline=theme["accent"],
+        width=3,
+    )
+
+    tb = draw.textbbox((0, 0), title, font=title_font)
+    tw = tb[2] - tb[0]
+    tx = (width - tw) // 2
+    ty = height // 2 - 110
+    draw.text((tx, ty), title, font=title_font, fill=theme["text_fill"])
+
+    sb = draw.textbbox((0, 0), subtitle, font=sub_font)
+    sw = sb[2] - sb[0]
+    sx = (width - sw) // 2
+    sy = height // 2 + 35
+    draw.text((sx, sy), subtitle, font=sub_font, fill=theme["accent"])
+
+    img.save(out_png)
 
 
 def make_styled_caption(text: str, out_png: Path, theme: dict, width: int = 1080, height: int = 1920) -> None:
@@ -107,6 +142,25 @@ def make_styled_caption(text: str, out_png: Path, theme: dict, width: int = 1080
     img.save(out_png)
 
 
+def collect_media(media_files: list[str]) -> list[str]:
+    found: list[str] = []
+    for m in media_files:
+        p = Path(m)
+        if p.exists():
+            found.append(str(p))
+
+    assets_dir = Path("assets")
+    if len(found) <= 1 and assets_dir.exists():
+        exts = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".mkv"}
+        for f in sorted(assets_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() in exts and "sample_grid" not in f.name.lower():
+                s = str(f)
+                if s not in found:
+                    found.append(s)
+
+    return found if found else ["assets/sample_grid.jpg"]
+
+
 def render_variant(
     media_files: list[str],
     audio_file: str,
@@ -122,36 +176,84 @@ def render_variant(
     if not lines:
         lines = ["पहिली ओळ इथे लिहा", "दुसरी ओळ इथे लिहा", "तिसरी ओळ इथे लिहा"]
 
-    valid_media = [m for m in media_files if Path(m).exists()] or [media_files[0]]
+    valid_media = collect_media(media_files)
     out_p = Path(out_file)
     out_p.parent.mkdir(parents=True, exist_ok=True)
 
+    intro_dur = 2.0
+    outro_dur = 2.0
+    body_dur = max(12.0, target_dur - intro_dur - outro_dur)
+    seg_dur = body_dur / len(lines)
+    total_frames = max(30, int(round(seg_dur * 30)))
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        n = len(lines)
-        seg_dur = target_dur / n
-        total_frames = max(30, int(round(seg_dur * 30)))
-
         inputs: list[str] = []
-        seg_specs: list[tuple[int, int, float]] = []
+        slots: list[tuple[int, float, bool, int]] = []  # (input_idx, dur, is_zoom_img, total_f)
 
+        # 1) Intro card
+        intro_png = tmp_dir / "intro.png"
+        make_card_png("अनमोल क्षण", f"भाग {variant_idx + 1}", intro_png, theme)
+        intro_i = len([x for x in inputs if x == "-i"])
+        inputs.extend(["-loop", "1", "-i", str(intro_png)])
+        slots.append((intro_i, intro_dur, False, 1))
+
+        # 2) Lyric segments
+        z0, z1 = theme["zoom_start"], theme["zoom_end"]
+        denom = max(1, total_frames - 1)
         for idx, line_text in enumerate(lines):
             m_src = valid_media[(idx + variant_idx) % len(valid_media)]
             is_vid = Path(m_src).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
+            bg_i = len([x for x in inputs if x == "-i"])
             if is_vid:
                 inputs.extend(["-stream_loop", "-1", "-i", m_src])
             else:
                 inputs.extend(["-loop", "1", "-i", m_src])
-            bg_i = len([x for x in inputs if x == "-i"]) - 1
 
             cap_png = tmp_dir / f"cap_{idx}.png"
             make_styled_caption(line_text, cap_png, theme)
+            fg_i = len([x for x in inputs if x == "-i"])
             inputs.extend(["-loop", "1", "-i", str(cap_png)])
-            fg_i = len([x for x in inputs if x == "-i"]) - 1
 
-            t_end = (idx + 1) * seg_dur if idx < n - 1 else target_dur
-            d_i = max(0.5, t_end - (idx * seg_dur))
-            seg_specs.append((bg_i, fg_i, d_i))
+            slots.append((-1, seg_dur, not is_vid, total_frames))
+            # Store pair metadata in separate list for clarity
+
+        # Rebuild cleanly with explicit segment descriptors
+        inputs.clear()
+        seg_defs: list[dict] = []
+
+        intro_i = len([x for x in inputs if x == "-i"])
+        inputs.extend(["-loop", "1", "-i", str(intro_png)])
+        seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
+
+        for idx, line_text in enumerate(lines):
+            m_src = valid_media[(idx + variant_idx) % len(valid_media)]
+            is_vid = Path(m_src).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
+            bg_i = len([x for x in inputs if x == "-i"])
+            if is_vid:
+                inputs.extend(["-stream_loop", "-1", "-i", m_src])
+            else:
+                inputs.extend(["-loop", "1", "-i", m_src])
+
+            cap_png = tmp_dir / f"cap_{idx}.png"
+            make_styled_caption(line_text, cap_png, theme)
+            fg_i = len([x for x in inputs if x == "-i"])
+            inputs.extend(["-loop", "1", "-i", str(cap_png)])
+
+            seg_defs.append({
+                "kind": "lyric",
+                "bg_i": bg_i,
+                "fg_i": fg_i,
+                "is_vid": is_vid,
+                "dur": seg_dur,
+                "frames": total_frames,
+            })
+
+        outro_png = tmp_dir / "outro.png"
+        make_card_png("पुन्हा भेटूया", "लाईक आणि शेअर करा", outro_png, theme)
+        outro_i = len([x for x in inputs if x == "-i"])
+        inputs.extend(["-loop", "1", "-i", str(outro_png)])
+        seg_defs.append({"kind": "card", "idx": outro_i, "dur": outro_dur})
 
         has_audio = bool(audio_file and Path(audio_file).exists())
         audio_i = -1
@@ -159,36 +261,40 @@ def render_variant(
             audio_i = len([x for x in inputs if x == "-i"])
             inputs.extend(["-i", str(Path(audio_file))])
 
-        z0 = theme["zoom_start"]
-        z1 = theme["zoom_end"]
-        denom = max(1, total_frames - 1)
-
         fc_parts: list[str] = []
-        seg_labels: list[str] = []
+        out_labels: list[str] = []
 
-        for idx, (bg_i, fg_i, d_i) in enumerate(seg_specs):
-            m_path = Path(valid_media[(idx + variant_idx) % len(valid_media)])
-            is_vid = m_path.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
-            if is_vid:
-                bg_filter = (
-                    f"[{bg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
-                    f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=rgba[bg{idx}]"
+        for s_idx, sd in enumerate(seg_defs):
+            d_i = sd["dur"]
+            if sd["kind"] == "card":
+                fc_parts.append(
+                    f"[{sd['idx']}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
+                    f"scale=1080:1920,fps=30,format=yuv420p[s{s_idx}]"
                 )
             else:
-                bg_filter = (
-                    f"[{bg_i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                    f"zoompan=z='{z0}+({z1}-({z0}))*(on/{denom})':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':"
-                    f"d={total_frames}:s=1080x1920:fps=30,trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[bg{idx}]"
+                bg_i = sd["bg_i"]
+                fg_i = sd["fg_i"]
+                f_cnt = sd["frames"]
+                if sd["is_vid"]:
+                    bg_f = (
+                        f"[{bg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
+                        f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=rgba[bg{s_idx}]"
+                    )
+                else:
+                    bg_f = (
+                        f"[{bg_i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+                        f"zoompan=z='{z0}+({z1}-({z0}))*(on/{denom})':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':"
+                        f"d={f_cnt}:s=1080x1920:fps=30,trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[bg{s_idx}]"
+                    )
+                fc_parts.append(
+                    f"{bg_f};"
+                    f"[{fg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[fg{s_idx}];"
+                    f"[bg{s_idx}][fg{s_idx}]overlay=0:0:format=auto,format=yuv420p[s{s_idx}]"
                 )
+            out_labels.append(f"[s{s_idx}]")
 
-            fc_parts.append(
-                f"{bg_filter};"
-                f"[{fg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[fg{idx}];"
-                f"[bg{idx}][fg{idx}]overlay=0:0:format=auto[seg{idx}]"
-            )
-            seg_labels.append(f"[seg{idx}]")
-
-        fc_parts.append(f"{''.join(seg_labels)}concat=n={n}:v=1:a=0,format=yuv420p[vout]")
+        total_clips = len(seg_defs)
+        fc_parts.append(f"{''.join(out_labels)}concat=n={total_clips}:v=1:a=0,format=yuv420p[vout]")
         filter_complex = ";".join(fc_parts)
 
         cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filter_complex, "-map", "[vout]"]
@@ -211,11 +317,11 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Batch reel ready ({theme['name']}): {out_p.resolve()}")
+    print(f"Reel with Intro/Outro ready ({theme['name']}): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch reel generator with varied caption styles and zoom motion")
+    parser = argparse.ArgumentParser(description="Batch reel generator with Intro, Outro, captions and motion")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
