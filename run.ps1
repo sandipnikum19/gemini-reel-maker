@@ -129,5 +129,20 @@ if ($cmd -eq "aiscene") {
     exit $LASTEXITCODE
 }
 
+if ($cmd -eq "obsreel") {
+    $py = Get-PythonExe
+    $obsDir = "assets/obs"
+    $latestObs = Get-ChildItem -Path $obsDir -Include "*.mp4","*.mkv" -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $latestObs) {
+        Write-Error "assets/obs फोल्डरमध्ये कोणतीही OBS रेकॉर्डिंग फाइल (.mp4 / .mkv) सापडली नाही."
+        exit 1
+    }
+    Write-Host "Using latest OBS recording: $($latestObs.FullName)"
+    & $py "batch_reel.py" --media $latestObs.FullName --audio "assets/song.mp3" --lyrics "assets/lyrics.txt" --count 1 --duration 22 --style "obs_reel" --out-dir "output"
+    exit $LASTEXITCODE
+}
 Write-Host "Unknown command: $cmd"
 Write-Host "Commands: setup, env, reel, batch, aiscene, open, push"
+
