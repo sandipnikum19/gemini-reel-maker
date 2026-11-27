@@ -59,6 +59,20 @@ THEMES = [
 ]
 
 
+def get_theme(theme_name: str | None, variant_idx: int, font_size_override: int | None) -> dict:
+    chosen = None
+    if theme_name:
+        for t in THEMES:
+            if t["name"].lower() == theme_name.strip().lower():
+                chosen = dict(t)
+                break
+    if chosen is None:
+        chosen = dict(THEMES[variant_idx % len(THEMES)])
+    if font_size_override and font_size_override > 0:
+        chosen["font_size"] = int(font_size_override)
+    return chosen
+
+
 def get_motion_expr(scene_idx: int, denom: int, theme: dict) -> tuple[str, str, str]:
     mode = scene_idx % 4
     base_z0 = float(theme["zoom_start"])
@@ -219,8 +233,10 @@ def render_variant(
     out_file: str,
     duration: float,
     variant_idx: int,
+    theme_name: str | None = None,
+    font_size_override: int | None = None,
 ) -> None:
-    theme = THEMES[variant_idx % len(THEMES)]
+    theme = get_theme(theme_name, variant_idx, font_size_override)
     target_dur = min(25.0, max(20.0, float(duration)))
     raw_text = Path(lyrics_file).read_text(encoding="utf-8-sig") if Path(lyrics_file).exists() else ""
 
@@ -351,11 +367,11 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Motion-varied reel ready ({theme['name']}): {out_p.resolve()}")
+    print(f"Styled reel ready ({theme['name']}, font={theme['font_size']}): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch reel generator with varied per-scene pan and zoom motion")
+    parser = argparse.ArgumentParser(description="Batch reel generator with selectable color theme and font size")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
@@ -363,12 +379,23 @@ def main() -> None:
     parser.add_argument("--duration", type=float, default=22.0)
     parser.add_argument("--style", default="reel")
     parser.add_argument("--out-dir", default="output")
+    parser.add_argument("--theme", default="", help="warm_cinema | neon_rose | clean_gold")
+    parser.add_argument("--font-size", type=int, default=0, help="Override caption font size")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     for i in range(max(1, args.count)):
         out_file = out_dir / f"{args.style}_{i + 1}.mp4"
-        render_variant(args.media, args.audio, args.lyrics, str(out_file), args.duration, i)
+        render_variant(
+            args.media,
+            args.audio,
+            args.lyrics,
+            str(out_file),
+            args.duration,
+            i,
+            theme_name=args.theme or None,
+            font_size_override=args.font_size or None,
+        )
 
 
 if __name__ == "__main__":
