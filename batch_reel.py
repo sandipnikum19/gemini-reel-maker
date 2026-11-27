@@ -59,7 +59,12 @@ THEMES = [
 ]
 
 
-def get_theme(theme_name: str | None, variant_idx: int, font_size_override: int | None) -> dict:
+def get_theme(
+    theme_name: str | None,
+    variant_idx: int,
+    font_size_override: int | None,
+    y_ratio_override: float | None,
+) -> dict:
     chosen = None
     if theme_name:
         for t in THEMES:
@@ -70,6 +75,8 @@ def get_theme(theme_name: str | None, variant_idx: int, font_size_override: int 
         chosen = dict(THEMES[variant_idx % len(THEMES)])
     if font_size_override and font_size_override > 0:
         chosen["font_size"] = int(font_size_override)
+    if y_ratio_override is not None and 0.20 <= y_ratio_override <= 0.90:
+        chosen["y_ratio"] = float(y_ratio_override)
     return chosen
 
 
@@ -235,13 +242,15 @@ def render_variant(
     variant_idx: int,
     theme_name: str | None = None,
     font_size_override: int | None = None,
+    y_ratio_override: float | None = None,
+    no_cards: bool = False,
 ) -> None:
-    theme = get_theme(theme_name, variant_idx, font_size_override)
+    theme = get_theme(theme_name, variant_idx, font_size_override, y_ratio_override)
     target_dur = min(25.0, max(20.0, float(duration)))
     raw_text = Path(lyrics_file).read_text(encoding="utf-8-sig") if Path(lyrics_file).exists() else ""
 
-    intro_dur = 2.0
-    outro_dur = 2.0
+    intro_dur = 0.0 if no_cards else 2.0
+    outro_dur = 0.0 if no_cards else 2.0
     body_dur = max(12.0, target_dur - intro_dur - outro_dur)
     timed_lines = parse_lyrics_with_timing(raw_text, body_dur)
 
@@ -254,11 +263,12 @@ def render_variant(
         inputs: list[str] = []
         seg_defs: list[dict] = []
 
-        intro_png = tmp_dir / "intro.png"
-        make_card_png("अनमोल क्षण", f"भाग {variant_idx + 1}", intro_png, theme)
-        intro_i = len([x for x in inputs if x == "-i"])
-        inputs.extend(["-loop", "1", "-i", str(intro_png)])
-        seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
+        if not no_cards:
+            intro_png = tmp_dir / "intro.png"
+            make_card_png("अनमोल क्षण", f"भाग {variant_idx + 1}", intro_png, theme)
+            intro_i = len([x for x in inputs if x == "-i"])
+            inputs.extend(["-loop", "1", "-i", str(intro_png)])
+            seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
 
         for idx, (line_text, seg_dur) in enumerate(timed_lines):
             total_frames = max(24, int(round(seg_dur * 30)))
@@ -285,11 +295,12 @@ def render_variant(
                 "frames": total_frames,
             })
 
-        outro_png = tmp_dir / "outro.png"
-        make_card_png("पुन्हा भेटूया", "लाईक आणि शेअर करा", outro_png, theme)
-        outro_i = len([x for x in inputs if x == "-i"])
-        inputs.extend(["-loop", "1", "-i", str(outro_png)])
-        seg_defs.append({"kind": "card", "idx": outro_i, "dur": outro_dur})
+        if not no_cards:
+            outro_png = tmp_dir / "outro.png"
+            make_card_png("पुन्हा भेटूया", "लाईक आणि शेअर करा", outro_png, theme)
+            outro_i = len([x for x in inputs if x == "-i"])
+            inputs.extend(["-loop", "1", "-i", str(outro_png)])
+            seg_defs.append({"kind": "card", "idx": outro_i, "dur": outro_dur})
 
         has_audio = bool(audio_file and Path(audio_file).exists())
         audio_i = -1
@@ -367,11 +378,11 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Styled reel ready ({theme['name']}, font={theme['font_size']}): {out_p.resolve()}")
+    print(f"Positioned reel ready ({theme['name']}, y={theme['y_ratio']}): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch reel generator with selectable color theme and font size")
+    parser = argparse.ArgumentParser(description="Batch reel generator with caption vertical position and card toggle")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
@@ -381,8 +392,11 @@ def main() -> None:
     parser.add_argument("--out-dir", default="output")
     parser.add_argument("--theme", default="", help="warm_cinema | neon_rose | clean_gold")
     parser.add_argument("--font-size", type=int, default=0, help="Override caption font size")
+    parser.add_argument("--y-ratio", type=float, default=-1.0, help="Caption vertical center ratio (0.20 to 0.90)")
+    parser.add_argument("--no-cards", action="store_true", help="Skip intro and outro cards")
     args = parser.parse_args()
 
+    y_ov = args.y_ratio if args.y_ratio >= 0 else None
     out_dir = Path(args.out_dir)
     for i in range(max(1, args.count)):
         out_file = out_dir / f"{args.style}_{i + 1}.mp4"
@@ -395,6 +409,8 @@ def main() -> None:
             i,
             theme_name=args.theme or None,
             font_size_override=args.font_size or None,
+            y_ratio_override=y_ov,
+            no_cards=args.no_cards,
         )
 
 
