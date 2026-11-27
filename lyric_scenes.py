@@ -26,7 +26,7 @@ def main() -> None:
     args = parser.parse_args()
 
     lyrics_p = Path(args.lyrics)
-    lines = [ln.strip() for ln in lyrics_p.read_text(encoding="utf-8-sig").splitlines() if ln.strip()]
+    lines = [ln.split("|", 1)[-1].strip() if "|" in ln else ln.strip() for ln in lyrics_p.read_text(encoding="utf-8-sig").splitlines() if ln.strip()]
     if not lines:
         raise RuntimeError("lyrics.txt मध्ये ओळी सापडल्या नाहीत.")
 
@@ -67,3 +67,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

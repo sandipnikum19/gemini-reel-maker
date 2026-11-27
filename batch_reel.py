@@ -1,4 +1,5 @@
 ﻿import argparse
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -58,6 +59,34 @@ THEMES = [
 ]
 
 
+def parse_lyrics_with_timing(raw_text: str, body_dur: float) -> list[tuple[str, float]]:
+    raw_lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+    if not raw_lines:
+        raw_lines = ["पहिली ओळ इथे लिहा", "दुसरी ओळ इथे लिहा", "तिसरी ओळ इथे लिहा"]
+
+    pattern = re.compile(r"^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\|\s*(.+)$")
+    parsed: list[tuple[str, float]] = []
+    all_timed = True
+
+    for ln in raw_lines:
+        m = pattern.match(ln)
+        if m:
+            st, en, txt = float(m.group(1)), float(m.group(2)), m.group(3).strip()
+            dur = max(0.8, en - st)
+            parsed.append((txt, dur))
+        else:
+            all_timed = False
+            break
+
+    if all_timed and parsed:
+        total_given = sum(d for _, d in parsed)
+        scale = body_dur / total_given if total_given > 0 else 1.0
+        return [(txt, max(0.8, d * scale)) for txt, d in parsed]
+
+    even_dur = body_dur / len(raw_lines)
+    return [(ln, even_dur) for ln in raw_lines]
+
+
 def make_card_png(title: str, subtitle: str, out_png: Path, theme: dict, width: int = 1080, height: int = 1920) -> None:
     img = Image.new("RGBA", (width, height), theme["card_bg"])
     draw = ImageDraw.Draw(img)
@@ -74,14 +103,12 @@ def make_card_png(title: str, subtitle: str, out_png: Path, theme: dict, width: 
     )
 
     tb = draw.textbbox((0, 0), title, font=title_font)
-    tw = tb[2] - tb[0]
-    tx = (width - tw) // 2
+    tx = (width - (tb[2] - tb[0])) // 2
     ty = height // 2 - 110
     draw.text((tx, ty), title, font=title_font, fill=theme["text_fill"])
 
     sb = draw.textbbox((0, 0), subtitle, font=sub_font)
-    sw = sb[2] - sb[0]
-    sx = (width - sw) // 2
+    sx = (width - (sb[2] - sb[0])) // 2
     sy = height // 2 + 35
     draw.text((sx, sy), subtitle, font=sub_font, fill=theme["accent"])
 
@@ -115,26 +142,17 @@ def make_styled_caption(text: str, out_png: Path, theme: dict, width: int = 1080
     box_top = int(height * float(theme["y_ratio"])) - block_h // 2
     box_bottom = box_top + block_h
 
-    max_w = 0
-    for ln in lines:
-        b = draw.textbbox((0, 0), ln, font=font)
-        max_w = max(max_w, b[2] - b[0])
-
+    max_w = max((draw.textbbox((0, 0), ln, font=font)[2] - draw.textbbox((0, 0), ln, font=font)[0]) for ln in lines)
     box_w = min(width - 80, max_w + 76)
     box_left = (width - box_w) // 2
     box_right = box_left + box_w
 
-    draw.rounded_rectangle(
-        [box_left, box_top, box_right, box_bottom],
-        radius=28,
-        fill=theme["box_fill"],
-    )
+    draw.rounded_rectangle([box_left, box_top, box_right, box_bottom], radius=28, fill=theme["box_fill"])
 
     y = box_top + 18
     for ln in lines:
         b = draw.textbbox((0, 0), ln, font=font)
-        lw = b[2] - b[0]
-        x = (width - lw) // 2
+        x = (width - (b[2] - b[0])) // 2
         draw.text((x + 2, y + 2), ln, font=font, fill=(0, 0, 0, 235))
         draw.text((x, y), ln, font=font, fill=theme["text_fill"])
         y += line_h
@@ -179,19 +197,15 @@ def render_variant(
     theme = THEMES[variant_idx % len(THEMES)]
     target_dur = min(25.0, max(20.0, float(duration)))
     raw_text = Path(lyrics_file).read_text(encoding="utf-8-sig") if Path(lyrics_file).exists() else ""
-    lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
-    if not lines:
-        lines = ["पहिली ओळ इथे लिहा", "दुसरी ओळ इथे लिहा", "तिसरी ओळ इथे लिहा"]
-
-    valid_media = collect_media(media_files)
-    out_p = Path(out_file)
-    out_p.parent.mkdir(parents=True, exist_ok=True)
 
     intro_dur = 2.0
     outro_dur = 2.0
     body_dur = max(12.0, target_dur - intro_dur - outro_dur)
-    seg_dur = body_dur / len(lines)
-    total_frames = max(30, int(round(seg_dur * 30)))
+    timed_lines = parse_lyrics_with_timing(raw_text, body_dur)
+
+    valid_media = collect_media(media_files)
+    out_p = Path(out_file)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -205,9 +219,9 @@ def render_variant(
         seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
 
         z0, z1 = theme["zoom_start"], theme["zoom_end"]
-        denom = max(1, total_frames - 1)
 
-        for idx, line_text in enumerate(lines):
+        for idx, (line_text, seg_dur) in enumerate(timed_lines):
+            total_frames = max(24, int(round(seg_dur * 30)))
             m_src = valid_media[(idx + variant_idx) % len(valid_media)]
             is_vid = Path(m_src).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
             bg_i = len([x for x in inputs if x == "-i"])
@@ -247,9 +261,9 @@ def render_variant(
 
         for s_idx, sd in enumerate(seg_defs):
             d_i = sd["dur"]
+            f_dur = min(0.35, d_i / 3.0)
+            f_out_st = max(0.0, d_i - f_dur)
             if sd["kind"] == "card":
-                f_dur = min(0.35, d_i / 3.0)
-                f_out_st = max(0.0, d_i - f_dur)
                 fc_parts.append(
                     f"[{sd['idx']}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
                     f"scale=1080:1920,fps=30,format=yuv420p,"
@@ -259,6 +273,7 @@ def render_variant(
                 bg_i = sd["bg_i"]
                 fg_i = sd["fg_i"]
                 f_cnt = sd["frames"]
+                denom = max(1, f_cnt - 1)
                 if sd["is_vid"]:
                     bg_f = (
                         f"[{bg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
@@ -274,8 +289,7 @@ def render_variant(
                     f"{bg_f};"
                     f"[{fg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[fg{s_idx}];"
                     f"[bg{s_idx}][fg{s_idx}]overlay=0:0:format=auto,format=yuv420p,"
-                    f"fade=t=in:st=0:d={min(0.35, d_i / 3.0):.3f},"
-                    f"fade=t=out:st={max(0.0, d_i - min(0.35, d_i / 3.0)):.3f}:d={min(0.35, d_i / 3.0):.3f}[s{s_idx}]"
+                    f"fade=t=in:st=0:d={f_dur:.3f},fade=t=out:st={f_out_st:.3f}:d={f_dur:.3f}[s{s_idx}]"
                 )
             out_labels.append(f"[s{s_idx}]")
 
@@ -311,11 +325,11 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Smooth reel ready ({theme['name']}): {out_p.resolve()}")
+    print(f"Timed reel ready ({theme['name']}): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch reel generator with smooth audio fade-out and 20-25s timing")
+    parser = argparse.ArgumentParser(description="Batch reel generator with optional per-line timing")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
@@ -333,4 +347,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
