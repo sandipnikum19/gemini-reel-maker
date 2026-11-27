@@ -59,6 +59,31 @@ THEMES = [
 ]
 
 
+def probe_audio_duration(audio_path: str) -> float | None:
+    if not audio_path or not Path(audio_path).exists():
+        return None
+    try:
+        res = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(Path(audio_path)),
+            ],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        val = float((res.stdout or "").strip())
+        return val if val > 0 else None
+    except Exception:
+        return None
+
+
 def get_theme(
     theme_name: str | None,
     variant_idx: int,
@@ -246,7 +271,9 @@ def render_variant(
     no_cards: bool = False,
 ) -> None:
     theme = get_theme(theme_name, variant_idx, font_size_override, y_ratio_override)
-    target_dur = min(25.0, max(20.0, float(duration)))
+    probed = probe_audio_duration(audio_file)
+    raw_dur = float(duration) if probed is None else min(float(duration), probed)
+    target_dur = min(25.0, max(20.0, raw_dur))
     raw_text = Path(lyrics_file).read_text(encoding="utf-8-sig") if Path(lyrics_file).exists() else ""
 
     intro_dur = 0.0 if no_cards else 2.0
@@ -392,7 +419,8 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Crossfade reel ready ({theme['name']}): {out_p.resolve()}")
+    size_mb = out_p.stat().st_size / (1024 * 1024) if out_p.exists() else 0.0
+    print(f"Crossfade reel ready ({theme['name']}, {target_dur:.1f}s, {size_mb:.2f} MB): {out_p.resolve()}")
 
 
 def main() -> None:
