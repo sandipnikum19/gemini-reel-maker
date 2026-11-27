@@ -143,6 +143,26 @@ if ($cmd -eq "obsreel") {
     & $py "batch_reel.py" --media $latestObs.FullName --audio "assets/song.mp3" --lyrics "assets/lyrics.txt" --count 1 --duration 22 --style "obs_reel" --out-dir "output"
     exit $LASTEXITCODE
 }
+if ($cmd -eq "lyricreel") {
+    $py = Get-PythonExe
+    $stylePrompt = Get-NamedArg -ArgsList $args -Name "Style" -DefaultValue "Romantic warm golden hour bokeh, soft cinema mood, clean 9:16 composition, no text"
+    $duration = Get-NamedArg -ArgsList $args -Name "Duration" -DefaultValue "22"
+    $count = Get-NamedArg -ArgsList $args -Name "Count" -DefaultValue "1"
+
+    & $py "lyric_scenes.py" --lyrics "assets/lyrics.txt" --base-style $stylePrompt
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    $sceneFiles = Get-ChildItem -Path "assets/scenes/scene_*.png" -ErrorAction SilentlyContinue |
+        Sort-Object Name |
+        ForEach-Object { $_.FullName }
+    if (-not $sceneFiles) {
+        $sceneFiles = @("assets/sample_grid.jpg")
+    }
+
+    & $py "batch_reel.py" --media $sceneFiles --audio "assets/song.mp3" --lyrics "assets/lyrics.txt" --count $count --duration $duration --style "lyric_reel" --out-dir "output"
+    exit $LASTEXITCODE
+}
 Write-Host "Unknown command: $cmd"
 Write-Host "Commands: setup, env, reel, batch, aiscene, open, push"
+
 
