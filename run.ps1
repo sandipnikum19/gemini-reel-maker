@@ -162,7 +162,45 @@ if ($cmd -eq "lyricreel") {
     & $py "batch_reel.py" --media $sceneFiles --audio "assets/song.mp3" --lyrics "assets/lyrics.txt" --count $count --duration $duration --style "lyric_reel" --out-dir "output"
     exit $LASTEXITCODE
 }
+if ($cmd -eq "quickreel") {
+    $py = Get-PythonExe
+    $theme = Get-NamedArg -ArgsList $args -Name "Theme" -DefaultValue "warm_cinema"
+    $fontSize = Get-NamedArg -ArgsList $args -Name "FontSize" -DefaultValue "56"
+    $yRatio = Get-NamedArg -ArgsList $args -Name "YRatio" -DefaultValue "0.78"
+    $duration = Get-NamedArg -ArgsList $args -Name "Duration" -DefaultValue "22"
+    $noCardsFlag = $false
+    foreach ($a in $args) {
+        if ("$a" -ieq "-NoCards") { $noCardsFlag = $true }
+    }
+
+    $sceneFiles = Get-ChildItem -Path "assets/scenes/scene_*.png" -ErrorAction SilentlyContinue |
+        Sort-Object Name |
+        ForEach-Object { $_.FullName }
+    if (-not $sceneFiles) {
+        $sceneFiles = @("assets/sample_grid.jpg")
+    }
+
+    $cmdArgs = @(
+        "batch_reel.py",
+        "--media", $sceneFiles,
+        "--audio", "assets/song.mp3",
+        "--lyrics", "assets/lyrics.txt",
+        "--count", "1",
+        "--duration", $duration,
+        "--style", "reel",
+        "--theme", $theme,
+        "--font-size", $fontSize,
+        "--y-ratio", $yRatio
+    )
+    if ($noCardsFlag) {
+        $cmdArgs += "--no-cards"
+    }
+
+    & $py @cmdArgs
+    exit $LASTEXITCODE
+}
 Write-Host "Unknown command: $cmd"
 Write-Host "Commands: setup, env, reel, batch, aiscene, open, push"
+
 
 
