@@ -81,6 +81,8 @@ if ($cmd -eq "reel") {
     $audio = Get-NamedArg -ArgsList $args -Name "Audio" -DefaultValue "assets/song.mp3"
     $lyrics = Get-NamedArg -ArgsList $args -Name "Lyrics" -DefaultValue "assets/lyrics.txt"
     $duration = Get-NamedArg -ArgsList $args -Name "Duration" -DefaultValue "22"
+    $introTitle = Get-NamedArg -ArgsList $args -Name "IntroTitle" -DefaultValue "????? ????"
+    $outroTitle = Get-NamedArg -ArgsList $args -Name "OutroTitle" -DefaultValue "?????? ??????"
     $out = Get-NamedArg -ArgsList $args -Name "Out" -DefaultValue "output/final_reel.mp4"
 
     & $py "reel_builder.py" --media $media --audio $audio --lyrics $lyrics --duration $duration --out $out
@@ -180,7 +182,9 @@ if ($cmd -eq "quickreel") {
         "--style", "reel",
         "--theme", $theme,
         "--font-size", $fontSize,
-        "--y-ratio", $yRatio
+        "--y-ratio", $yRatio,
+        "--intro-title", $introTitle,
+        "--outro-title", $outroTitle
     )
     if ($noCardsFlag) {
         $cmdArgs += "--no-cards"
