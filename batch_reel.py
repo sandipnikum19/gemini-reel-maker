@@ -248,9 +248,12 @@ def render_variant(
         for s_idx, sd in enumerate(seg_defs):
             d_i = sd["dur"]
             if sd["kind"] == "card":
+                f_dur = min(0.35, d_i / 3.0)
+                f_out_st = max(0.0, d_i - f_dur)
                 fc_parts.append(
                     f"[{sd['idx']}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
-                    f"scale=1080:1920,fps=30,format=yuv420p[s{s_idx}]"
+                    f"scale=1080:1920,fps=30,format=yuv420p,"
+                    f"fade=t=in:st=0:d={f_dur:.3f},fade=t=out:st={f_out_st:.3f}:d={f_dur:.3f}[s{s_idx}]"
                 )
             else:
                 bg_i = sd["bg_i"]
@@ -270,7 +273,9 @@ def render_variant(
                 fc_parts.append(
                     f"{bg_f};"
                     f"[{fg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[fg{s_idx}];"
-                    f"[bg{s_idx}][fg{s_idx}]overlay=0:0:format=auto,format=yuv420p[s{s_idx}]"
+                    f"[bg{s_idx}][fg{s_idx}]overlay=0:0:format=auto,format=yuv420p,"
+                    f"fade=t=in:st=0:d={min(0.35, d_i / 3.0):.3f},"
+                    f"fade=t=out:st={max(0.0, d_i - min(0.35, d_i / 3.0)):.3f}:d={min(0.35, d_i / 3.0):.3f}[s{s_idx}]"
                 )
             out_labels.append(f"[s{s_idx}]")
 
@@ -328,3 +333,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
