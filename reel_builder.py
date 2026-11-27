@@ -75,6 +75,12 @@ def make_caption_png(text: str, out_png: Path, width: int = 1080, height: int = 
     img.save(out_png)
 
 
+def add_input(inputs: list[str], flag_prefix: list[str], path_str: str) -> int:
+    idx = len([x for x in inputs if x == "-i"])
+    inputs.extend([*flag_prefix, "-i", path_str])
+    return idx
+
+
 def build_reel(
     media_files: list[str],
     audio_file: str,
@@ -103,25 +109,19 @@ def build_reel(
         for idx, line_text in enumerate(lines):
             m_src = valid_media[idx % len(valid_media)]
             is_vid = Path(m_src).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
-            if is_vid:
-                inputs.extend(["-stream_loop", "-1", "-i", m_src])
-            else:
-                inputs.extend(["-loop", "1", "-i", m_src])
-            bg_i = (len(inputs) // 2) - 1
+            bg_prefix = ["-stream_loop", "-1"] if is_vid else ["-loop", "1"]
+            bg_i = add_input(inputs, bg_prefix, m_src)
 
             cap_png = tmp_dir / f"cap_{idx}.png"
             make_caption_png(line_text, cap_png)
-            inputs.extend(["-loop", "1", "-i", str(cap_png)])
-            fg_i = (len(inputs) // 2) - 1
+            fg_i = add_input(inputs, ["-loop", "1"], str(cap_png))
 
             t_start = idx * seg_dur
             t_end = (idx + 1) * seg_dur if idx < n - 1 else target_dur
             seg_specs.append((bg_i, fg_i, t_start, t_end))
 
         has_audio = bool(audio_file and Path(audio_file).exists())
-        audio_i = len(inputs) // 2
-        if has_audio:
-            inputs.extend(["-i", str(Path(audio_file))])
+        audio_i = add_input(inputs, [], str(Path(audio_file))) if has_audio else -1
 
         fc_parts: list[str] = []
         seg_labels: list[str] = []
@@ -148,7 +148,7 @@ def build_reel(
             "-map",
             "[vout]",
         ]
-        if has_audio:
+        if has_audio and audio_i >= 0:
             cmd.extend(["-map", f"{audio_i}:a:0", "-c:a", "aac", "-b:a", "192k", "-shortest"])
 
         cmd.extend([
