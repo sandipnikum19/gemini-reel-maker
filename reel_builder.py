@@ -97,41 +97,46 @@ def build_reel(
         n = len(lines)
         seg_dur = target_dur / n
 
-        primary_media = valid_media[0]
-        is_vid = Path(primary_media).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
-
         inputs: list[str] = []
-        if is_vid:
-            inputs.extend(["-stream_loop", "-1", "-i", primary_media])
-        else:
-            inputs.extend(["-loop", "1", "-i", primary_media])
+        seg_specs: list[tuple[int, int, float, float]] = []
 
-        cap_indices: list[int] = []
         for idx, line_text in enumerate(lines):
+            m_src = valid_media[idx % len(valid_media)]
+            is_vid = Path(m_src).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
+            if is_vid:
+                inputs.extend(["-stream_loop", "-1", "-i", m_src])
+            else:
+                inputs.extend(["-loop", "1", "-i", m_src])
+            bg_i = (len(inputs) // 2) - 1
+
             cap_png = tmp_dir / f"cap_{idx}.png"
             make_caption_png(line_text, cap_png)
             inputs.extend(["-loop", "1", "-i", str(cap_png)])
-            cap_indices.append(1 + idx)
+            fg_i = (len(inputs) // 2) - 1
+
+            t_start = idx * seg_dur
+            t_end = (idx + 1) * seg_dur if idx < n - 1 else target_dur
+            seg_specs.append((bg_i, fg_i, t_start, t_end))
 
         has_audio = bool(audio_file and Path(audio_file).exists())
-        audio_idx = 1 + len(cap_indices)
+        audio_i = len(inputs) // 2
         if has_audio:
             inputs.extend(["-i", str(Path(audio_file))])
 
-        fc_parts: list[str] = [
-            f"[0:v]trim=duration={target_dur:.3f},setpts=PTS-STARTPTS,"
-            f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=rgba[cur0]"
-        ]
+        fc_parts: list[str] = []
+        seg_labels: list[str] = []
 
-        for i, c_idx in enumerate(cap_indices):
-            t_start = i * seg_dur
-            t_end = (i + 1) * seg_dur if i < n - 1 else target_dur
-            fc_parts.append(f"[{c_idx}:v]format=rgba[fg{i}]")
+        for idx, (bg_i, fg_i, t_start, t_end) in enumerate(seg_specs):
+            d_i = max(0.5, t_end - t_start)
             fc_parts.append(
-                f"[cur{i}][fg{i}]overlay=0:0:enable='between(t,{t_start:.3f},{t_end:.3f})':format=auto[cur{i+1}]"
+                f"[{bg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
+                f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=rgba[bg{idx}];"
+                f"[{fg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[fg{idx}];"
+                f"[bg{idx}][fg{idx}]overlay=0:0:format=auto[seg{idx}]"
             )
+            seg_labels.append(f"[seg{idx}]")
 
-        fc_parts.append(f"[cur{n}]format=yuv420p[vout]")
+        fc_parts.append(f"{''.join(seg_labels)}concat=n={n}:v=1:a=0,format=yuv420p[vout]")
         filter_complex = ";".join(fc_parts)
 
         cmd = [
@@ -144,7 +149,7 @@ def build_reel(
             "[vout]",
         ]
         if has_audio:
-            cmd.extend(["-map", f"{audio_idx}:a:0", "-c:a", "aac", "-b:a", "192k", "-shortest"])
+            cmd.extend(["-map", f"{audio_i}:a:0", "-c:a", "aac", "-b:a", "192k", "-shortest"])
 
         cmd.extend([
             "-t",
@@ -160,13 +165,13 @@ def build_reel(
 
         res = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         if res.returncode != 0:
-            raise RuntimeError(f"FFmpeg build failed:\n{res.stderr[-900:]}")
+            raise RuntimeError(f"FFmpeg multi-media build failed:\n{res.stderr[-900:]}")
 
-    print(f"Reel ready ({target_dur:.1f}s): {out_p.resolve()}")
+    print(f"Multi-scene reel ready ({target_dur:.1f}s): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fast 20-25s reel builder with Devanagari captions")
+    parser = argparse.ArgumentParser(description="Multi-scene 20-25s reel builder with captions")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
