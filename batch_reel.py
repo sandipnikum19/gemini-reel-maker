@@ -270,6 +270,8 @@ def render_variant(
     font_size_override: int | None = None,
     y_ratio_override: float | None = None,
     no_cards: bool = False,
+    intro_title: str = "????? ????",
+    outro_title: str = "?????? ??????",
 ) -> None:
     theme = get_theme(theme_name, variant_idx, font_size_override, y_ratio_override)
     probed = probe_audio_duration(audio_file)
@@ -437,6 +439,8 @@ def main() -> None:
     parser.add_argument("--font-size", type=int, default=0, help="Override caption font size")
     parser.add_argument("--y-ratio", type=float, default=-1.0, help="Caption vertical center ratio (0.20 to 0.90)")
     parser.add_argument("--no-cards", action="store_true", help="Skip intro and outro cards")
+    parser.add_argument("--intro-title", default="????? ????", help="Intro card title")
+    parser.add_argument("--outro-title", default="?????? ??????", help="Outro card title")
     args = parser.parse_args()
 
     y_ov = args.y_ratio if args.y_ratio >= 0 else None
@@ -454,6 +458,8 @@ def main() -> None:
             font_size_override=args.font_size or None,
             y_ratio_override=y_ov,
             no_cards=args.no_cards,
+            intro_title=args.intro_title,
+            outro_title=args.outro_title,
         )
 
 
