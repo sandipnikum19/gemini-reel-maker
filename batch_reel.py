@@ -276,11 +276,19 @@ def render_variant(
 
         total_clips = len(seg_defs)
         fc_parts.append(f"{''.join(out_labels)}concat=n={total_clips}:v=1:a=0,format=yuv420p[vout]")
+
+        fade_start = max(0.0, target_dur - 1.5)
+        if has_audio and audio_i >= 0:
+            fc_parts.append(
+                f"[{audio_i}:a]atrim=0:{target_dur:.3f},asetpts=PTS-STARTPTS,"
+                f"afade=t=out:st={fade_start:.3f}:d=1.5[aout]"
+            )
+
         filter_complex = ";".join(fc_parts)
 
         cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filter_complex, "-map", "[vout]"]
         if has_audio and audio_i >= 0:
-            cmd.extend(["-map", f"{audio_i}:a:0", "-c:a", "aac", "-b:a", "192k", "-shortest"])
+            cmd.extend(["-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-shortest"])
 
         cmd.extend([
             "-t",
@@ -298,11 +306,11 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Reel ready ({theme['name']}): {out_p.resolve()}")
+    print(f"Smooth reel ready ({theme['name']}): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch reel generator with Intro, Outro, captions and motion")
+    parser = argparse.ArgumentParser(description="Batch reel generator with smooth audio fade-out and 20-25s timing")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
