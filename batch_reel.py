@@ -258,6 +258,10 @@ def render_variant(
     out_p = Path(out_file)
     out_p.parent.mkdir(parents=True, exist_ok=True)
 
+    xfade_dur = 0.40
+    total_segs = len(timed_lines) + (0 if no_cards else 2)
+    overlap_extra = xfade_dur if total_segs > 1 else 0.0
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         inputs: list[str] = []
@@ -268,10 +272,12 @@ def render_variant(
             make_card_png("अनमोल क्षण", f"भाग {variant_idx + 1}", intro_png, theme)
             intro_i = len([x for x in inputs if x == "-i"])
             inputs.extend(["-loop", "1", "-i", str(intro_png)])
-            seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
+            seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur + overlap_extra, "step": intro_dur})
 
         for idx, (line_text, seg_dur) in enumerate(timed_lines):
-            total_frames = max(24, int(round(seg_dur * 30)))
+            is_last = (idx == len(timed_lines) - 1) and no_cards
+            clip_dur = seg_dur if is_last else (seg_dur + overlap_extra)
+            total_frames = max(24, int(round(clip_dur * 30)))
             m_src = valid_media[(idx + variant_idx) % len(valid_media)]
             is_vid = Path(m_src).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
             bg_i = len([x for x in inputs if x == "-i"])
@@ -291,7 +297,8 @@ def render_variant(
                 "bg_i": bg_i,
                 "fg_i": fg_i,
                 "is_vid": is_vid,
-                "dur": seg_dur,
+                "dur": clip_dur,
+                "step": seg_dur,
                 "frames": total_frames,
             })
 
@@ -300,7 +307,7 @@ def render_variant(
             make_card_png("पुन्हा भेटूया", "लाईक आणि शेअर करा", outro_png, theme)
             outro_i = len([x for x in inputs if x == "-i"])
             inputs.extend(["-loop", "1", "-i", str(outro_png)])
-            seg_defs.append({"kind": "card", "idx": outro_i, "dur": outro_dur})
+            seg_defs.append({"kind": "card", "idx": outro_i, "dur": outro_dur, "step": outro_dur})
 
         has_audio = bool(audio_file and Path(audio_file).exists())
         audio_i = -1
@@ -309,17 +316,13 @@ def render_variant(
             inputs.extend(["-i", str(Path(audio_file))])
 
         fc_parts: list[str] = []
-        out_labels: list[str] = []
 
         for s_idx, sd in enumerate(seg_defs):
             d_i = sd["dur"]
-            f_dur = min(0.35, d_i / 3.0)
-            f_out_st = max(0.0, d_i - f_dur)
             if sd["kind"] == "card":
                 fc_parts.append(
                     f"[{sd['idx']}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,"
-                    f"scale=1080:1920,fps=30,format=yuv420p,"
-                    f"fade=t=in:st=0:d={f_dur:.3f},fade=t=out:st={f_out_st:.3f}:d={f_dur:.3f}[s{s_idx}]"
+                    f"scale=1080:1920,fps=30,format=yuv420p[s{s_idx}]"
                 )
             else:
                 bg_i = sd["bg_i"]
@@ -341,13 +344,24 @@ def render_variant(
                 fc_parts.append(
                     f"{bg_f};"
                     f"[{fg_i}:v]trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[fg{s_idx}];"
-                    f"[bg{s_idx}][fg{s_idx}]overlay=0:0:format=auto,format=yuv420p,"
-                    f"fade=t=in:st=0:d={f_dur:.3f},fade=t=out:st={f_out_st:.3f}:d={f_dur:.3f}[s{s_idx}]"
+                    f"[bg{s_idx}][fg{s_idx}]overlay=0:0:format=auto,format=yuv420p[s{s_idx}]"
                 )
-            out_labels.append(f"[s{s_idx}]")
 
-        total_clips = len(seg_defs)
-        fc_parts.append(f"{''.join(out_labels)}concat=n={total_clips}:v=1:a=0,format=yuv420p[vout]")
+        if len(seg_defs) == 1:
+            fc_parts.append("[s0]fade=t=in:st=0:d=0.35,fade=t=out:st={:.3f}:d=0.45,format=yuv420p[vout]".format(max(0.0, target_dur - 0.45)))
+        else:
+            prev_label = "s0"
+            offset = seg_defs[0]["step"]
+            for i in range(1, len(seg_defs)):
+                next_label = f"xf{i}"
+                fc_parts.append(
+                    f"[{prev_label}][s{i}]xfade=transition=fade:duration={xfade_dur:.3f}:offset={offset:.3f}[{next_label}]"
+                )
+                prev_label = next_label
+                offset += seg_defs[i]["step"]
+            fc_parts.append(
+                f"[{prev_label}]fade=t=in:st=0:d=0.35,fade=t=out:st={max(0.0, target_dur - 0.45):.3f}:d=0.45,format=yuv420p[vout]"
+            )
 
         fade_start = max(0.0, target_dur - 1.5)
         if has_audio and audio_i >= 0:
@@ -378,11 +392,11 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Positioned reel ready ({theme['name']}, y={theme['y_ratio']}): {out_p.resolve()}")
+    print(f"Crossfade reel ready ({theme['name']}): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch reel generator with caption vertical position and card toggle")
+    parser = argparse.ArgumentParser(description="Batch reel generator with smooth xfade transitions")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
