@@ -59,6 +59,32 @@ THEMES = [
 ]
 
 
+def get_motion_expr(scene_idx: int, denom: int, theme: dict) -> tuple[str, str, str]:
+    mode = scene_idx % 4
+    base_z0 = float(theme["zoom_start"])
+    base_z1 = float(theme["zoom_end"])
+
+    if mode == 0:
+        z0, z1 = 1.00, 1.10
+        x_expr = "'(iw-iw/zoom)/2'"
+        y_expr = "'(ih-ih/zoom)/2'"
+    elif mode == 1:
+        z0, z1 = 1.10, 1.02
+        x_expr = f"'(iw-iw/zoom)*({denom}-on)/{denom}'"
+        y_expr = "'(ih-ih/zoom)/2'"
+    elif mode == 2:
+        z0, z1 = 1.02, 1.10
+        x_expr = f"'(iw-iw/zoom)*(on/{denom})'"
+        y_expr = "'(ih-ih/zoom)/2'"
+    else:
+        z0, z1 = base_z0, base_z1
+        x_expr = "'(iw-iw/zoom)/2'"
+        y_expr = f"'(ih-ih/zoom)*(on/{denom})'"
+
+    z_expr = f"'{z0}+({z1}-({z0}))*(on/{denom})'"
+    return z_expr, x_expr, y_expr
+
+
 def parse_lyrics_with_timing(raw_text: str, body_dur: float) -> list[tuple[str, float]]:
     raw_lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
     if not raw_lines:
@@ -218,8 +244,6 @@ def render_variant(
         inputs.extend(["-loop", "1", "-i", str(intro_png)])
         seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
 
-        z0, z1 = theme["zoom_start"], theme["zoom_end"]
-
         for idx, (line_text, seg_dur) in enumerate(timed_lines):
             total_frames = max(24, int(round(seg_dur * 30)))
             m_src = valid_media[(idx + variant_idx) % len(valid_media)]
@@ -237,6 +261,7 @@ def render_variant(
 
             seg_defs.append({
                 "kind": "lyric",
+                "scene_idx": idx,
                 "bg_i": bg_i,
                 "fg_i": fg_i,
                 "is_vid": is_vid,
@@ -280,9 +305,10 @@ def render_variant(
                         f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=rgba[bg{s_idx}]"
                     )
                 else:
+                    z_expr, x_expr, y_expr = get_motion_expr(sd["scene_idx"], denom, theme)
                     bg_f = (
                         f"[{bg_i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                        f"zoompan=z='{z0}+({z1}-({z0}))*(on/{denom})':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':"
+                        f"zoompan=z={z_expr}:x={x_expr}:y={y_expr}:"
                         f"d={f_cnt}:s=1080x1920:fps=30,trim=duration={d_i:.3f},setpts=PTS-STARTPTS,format=rgba[bg{s_idx}]"
                     )
                 fc_parts.append(
@@ -325,11 +351,11 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Timed reel ready ({theme['name']}): {out_p.resolve()}")
+    print(f"Motion-varied reel ready ({theme['name']}): {out_p.resolve()}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch reel generator with optional per-line timing")
+    parser = argparse.ArgumentParser(description="Batch reel generator with varied per-scene pan and zoom motion")
     parser.add_argument("--media", nargs="+", default=["assets/sample_grid.jpg"])
     parser.add_argument("--audio", default="assets/song.mp3")
     parser.add_argument("--lyrics", default="assets/lyrics.txt")
