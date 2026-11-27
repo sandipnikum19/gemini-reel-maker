@@ -225,7 +225,8 @@ def make_styled_caption(text: str, out_png: Path, theme: dict, width: int = 1080
     for ln in lines:
         b = draw.textbbox((0, 0), ln, font=font)
         x = (width - (b[2] - b[0])) // 2
-        draw.text((x + 2, y + 2), ln, font=font, fill=(0, 0, 0, 235))
+        for ox, oy in [(-2, 0), (2, 0), (0, -2), (0, 2), (2, 2)]:
+            draw.text((x + ox, y + oy), ln, font=font, fill=(0, 0, 0, 240))
         draw.text((x, y), ln, font=font, fill=theme["text_fill"])
         y += line_h
 
