@@ -149,6 +149,13 @@ def collect_media(media_files: list[str]) -> list[str]:
         if p.exists():
             found.append(str(p))
 
+    scenes_dir = Path("assets/scenes")
+    if len(found) <= 1 and scenes_dir.exists():
+        for f in sorted(scenes_dir.glob("scene_*.png")):
+            s = str(f)
+            if s not in found:
+                found.append(s)
+
     assets_dir = Path("assets")
     if len(found) <= 1 and assets_dir.exists():
         exts = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".mkv"}
@@ -189,42 +196,16 @@ def render_variant(
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         inputs: list[str] = []
-        slots: list[tuple[int, float, bool, int]] = []  # (input_idx, dur, is_zoom_img, total_f)
+        seg_defs: list[dict] = []
 
-        # 1) Intro card
         intro_png = tmp_dir / "intro.png"
         make_card_png("अनमोल क्षण", f"भाग {variant_idx + 1}", intro_png, theme)
         intro_i = len([x for x in inputs if x == "-i"])
         inputs.extend(["-loop", "1", "-i", str(intro_png)])
-        slots.append((intro_i, intro_dur, False, 1))
+        seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
 
-        # 2) Lyric segments
         z0, z1 = theme["zoom_start"], theme["zoom_end"]
         denom = max(1, total_frames - 1)
-        for idx, line_text in enumerate(lines):
-            m_src = valid_media[(idx + variant_idx) % len(valid_media)]
-            is_vid = Path(m_src).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
-            bg_i = len([x for x in inputs if x == "-i"])
-            if is_vid:
-                inputs.extend(["-stream_loop", "-1", "-i", m_src])
-            else:
-                inputs.extend(["-loop", "1", "-i", m_src])
-
-            cap_png = tmp_dir / f"cap_{idx}.png"
-            make_styled_caption(line_text, cap_png, theme)
-            fg_i = len([x for x in inputs if x == "-i"])
-            inputs.extend(["-loop", "1", "-i", str(cap_png)])
-
-            slots.append((-1, seg_dur, not is_vid, total_frames))
-            # Store pair metadata in separate list for clarity
-
-        # Rebuild cleanly with explicit segment descriptors
-        inputs.clear()
-        seg_defs: list[dict] = []
-
-        intro_i = len([x for x in inputs if x == "-i"])
-        inputs.extend(["-loop", "1", "-i", str(intro_png)])
-        seg_defs.append({"kind": "card", "idx": intro_i, "dur": intro_dur})
 
         for idx, line_text in enumerate(lines):
             m_src = valid_media[(idx + variant_idx) % len(valid_media)]
@@ -317,7 +298,7 @@ def render_variant(
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg variant {variant_idx + 1} failed:\n{res.stderr[-900:]}")
 
-    print(f"Reel with Intro/Outro ready ({theme['name']}): {out_p.resolve()}")
+    print(f"Reel ready ({theme['name']}): {out_p.resolve()}")
 
 
 def main() -> None:
