@@ -54,22 +54,12 @@ if ($cmd -eq "env") {
 }
 
 if ($cmd -eq "open") {
-    $candidates = @("output/ai_reel_1.mp4", "output/final_reel.mp4", "output/reel_1.mp4")
-    $targetFile = $null
-    foreach ($c in $candidates) {
-        if (Test-Path $c) {
-            $targetFile = $c
-            break
-        }
-    }
-    if (-not $targetFile) {
-        $latest = Get-ChildItem -Path "output" -Filter "*.mp4" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-        if ($latest) { $targetFile = $latest.FullName }
-    }
+    $latest = Get-ChildItem -Path "output" -Filter "*.mp4" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    $targetFile = if ($latest) { $latest.FullName } else { $null }
     if ($targetFile) {
-        Write-Host "Opening $targetFile..."
+        Write-Host "Opening latest reel: $targetFile..."
         Start-Process -FilePath $targetFile
     } else {
         Write-Host "output/ फोल्डरमध्ये कोणताही .mp4 व्हिडिओ सापडला नाही."
@@ -201,6 +191,7 @@ if ($cmd -eq "quickreel") {
 }
 Write-Host "Unknown command: $cmd"
 Write-Host "Commands: setup, env, reel, batch, aiscene, open, push"
+
 
 
 
