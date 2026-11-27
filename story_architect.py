@@ -1,24 +1,25 @@
 ﻿import argparse
 import json
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 
 def load_env_key(env_path: Path = Path(".env")) -> str:
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if key:
-        return key
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
+        for line in env_path.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
             if line.startswith("GEMINI_API_KEY="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return ""
+                val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if val:
+                    return val
+    return os.environ.get("GEMINI_API_KEY", "").strip()
 
 
 def call_gemini_plan(prompt_text: str, lines: list[str], api_key: str) -> dict | None:
     if not api_key:
+        print("GEMINI_API_KEY missing. Using local fallback.")
         return None
 
     lyrics_joined = "\n".join(lines) if lines else "No lyrics provided"
@@ -41,7 +42,7 @@ Return ONLY valid JSON with keys:
     }
     req = urllib.request.Request(
         url,
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -50,6 +51,10 @@ Return ONLY valid JSON with keys:
             data = json.loads(resp.read().decode("utf-8"))
         text = data["candidates"][0]["content"]["parts"][0]["text"]
         return json.loads(text)
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        print(f"Gemini HTTP {exc.code}: {err_body[:300]}")
+        return None
     except Exception as exc:
         print(f"Gemini API fallback triggered ({exc}). Using local story architect.")
         return None
@@ -98,7 +103,7 @@ def build_fallback_plan(prompt_text: str, lines: list[str]) -> dict:
         })
 
     grid_prompts = [
-        f"2x2 grid of 4 cinematic vertical panels for '{prompt_text}': top-left muted room, top-right window rain, bottom-left phone glow, bottom-right warm lamp light, consistent character, no text.",
+        f"2x2 grid of 4 cinematic vertical panels for 'emotional vertical reel': top-left muted room, top-right window rain, bottom-left phone glow, bottom-right warm lamp light, consistent character, no text.",
         f"2x2 grid of 4 emotional reel panels: top-left quiet reflection, top-right walking away, bottom-left neon/golden spark, bottom-right hopeful wide view, consistent character, no text.",
     ]
 
@@ -111,7 +116,11 @@ def build_fallback_plan(prompt_text: str, lines: list[str]) -> dict:
 
 
 def generate_plan(prompt_text: str, lyrics_file: str, out_json: str) -> None:
-    lines = Path(lyrics_file).read_text(encoding="utf-8").splitlines() if Path(lyrics_file).exists() else []
+    lines = (
+        Path(lyrics_file).read_text(encoding="utf-8-sig").splitlines()
+        if Path(lyrics_file).exists()
+        else []
+    )
     api_key = load_env_key()
     plan = call_gemini_plan(prompt_text, lines, api_key) or build_fallback_plan(prompt_text, lines)
 
@@ -132,3 +141,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

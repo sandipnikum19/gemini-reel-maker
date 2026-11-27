@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Position = 0)]
     [ValidateSet("sample", "reel", "grid", "split", "plan", "beat", "render", "heartbreak", "batch", "open", "push")]
     [string]$Mode = "sample",
@@ -44,13 +44,13 @@ switch ($Mode) {
     "plan" {
         python story_architect.py --prompt $Prompt --lyrics $Lyrics --out ".\output\story_plan.json"
         if (Test-Path ".\output\story_plan.json") {
-            Get-Content ".\output\story_plan.json" -Raw
+            Get-Content ".\output\story_plan.json" -Raw -Encoding UTF8
         }
     }
     "beat" {
         python beat_director.py --plan ".\output\story_plan.json" --lyrics $Lyrics --audio $Audio --style $Style --out ".\output\storyboard.json"
         if (Test-Path ".\output\storyboard.json") {
-            Get-Content ".\output\storyboard.json" -Raw
+            Get-Content ".\output\storyboard.json" -Raw -Encoding UTF8
         }
     }
     "render" {
@@ -87,3 +87,4 @@ switch ($Mode) {
         git push
     }
 }
+
